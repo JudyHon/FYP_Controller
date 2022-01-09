@@ -81,12 +81,96 @@ float valueConvert(uint32_t value) {
 }
 uint32_t VR[4];
 
-#define MPU6050_ADDR 0XD0
+#define MPU6050_ADDR 0xD0
 
-#DEFINE SMPLRT_DIV_REG 0X19
+#define SMPLRT_DIV_REG 0x19
+#define CONFIG_REG 0x1A
+#define GYRO_CONFIG_REG 0x1B
+#define ACCEL_CONFIG_REG 0x1C
+#define ACCEL_XOUT_H_REG 0x3B
+#define TEMP_OUT_H_REG 0x41
+#define GYRO_XOUT_H_REG 0x43
+#define PWR_MGMT_1_REG 0x6B
+#define WHO_AM_I_REG 0x75
+
+#define PI acos(-1)
+
 void MPU6050_Init (void)
 {
+	
 	uint8_t check, data;
+	HAL_I2C_Mem_Read (&hi2c2, MPU6050_ADDR, WHO_AM_I_REG, 1, &check, 1, 1000);
+	
+	if (check == 104) // if the device is present
+	{
+			data = 0x00;
+			HAL_I2C_Mem_Write(&hi2c2, MPU6050_ADDR, PWR_MGMT_1_REG, 1, &data, 1, 1000);
+		
+			data = 0x07;
+			HAL_I2C_Mem_Write(&hi2c2, MPU6050_ADDR, SMPLRT_DIV_REG, 1, &data, 1, 1000);
+	
+			data = 0x06;
+			HAL_I2C_Mem_Write(&hi2c2, MPU6050_ADDR, CONFIG_REG, 1, &data, 1, 1000);
+		
+			data = 0x01;
+			HAL_I2C_Mem_Write(&hi2c2, MPU6050_ADDR, ACCEL_CONFIG_REG, 1, &data, 1, 1000);
+			
+			data = 0x18;
+			HAL_I2C_Mem_Write(&hi2c2, MPU6050_ADDR, GYRO_CONFIG_REG, 1, &data, 1, 1000);
+		
+		
+	}
+	
+}
+
+int16_t Accel_X_RAW, Accel_Y_RAW, Accel_Z_RAW, Gyro_X_RAW, Gyro_Y_RAW, Gyro_Z_RAW;
+float Ax, Ay, Az, Gx, Gy, Gz;
+float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;
+float roll, pitch, yaw;
+float elapsedTime, currentTime, previousTime;
+float accVector;
+
+void MPU6050_Read_Accel (void)
+{
+	uint8_t Rec_Data[6];
+	
+	HAL_I2C_Mem_Read(&hi2c2, MPU6050_ADDR, ACCEL_XOUT_H_REG, 1, Rec_Data, 6, 1000);
+	
+	Accel_X_RAW = (int16_t)(Rec_Data[0] << 8 | Rec_Data[1]);
+	Accel_Y_RAW = (int16_t)(Rec_Data[2] << 8 | Rec_Data[3]);
+	Accel_Z_RAW = (int16_t)(Rec_Data[4] << 8 | Rec_Data[5]);
+	
+	Ax = Accel_X_RAW/16384.0 - 0.1;
+	Ay = Accel_Y_RAW/16384.0 - 0.02;
+	Az = Accel_Z_RAW/16384.0;
+	
+	accAngleX = (atan(Ay / sqrt(pow(Ax, 2) + pow(Az, 2))) * 180 / PI) - 0.58;
+	accAngleY = (atan(-1 * Ax / sqrt(pow(Ay, 2) + pow(Az, 2))) * 180 / PI) + 1.58;
+}
+
+void MPU6050_Read_Gyro (void)
+{
+	previousTime = currentTime;
+	currentTime = HAL_GetTick();
+	elapsedTime = (currentTime - previousTime) / 1000;
+	uint8_t Rec_Data[6];
+	
+	HAL_I2C_Mem_Read(&hi2c2, MPU6050_ADDR, GYRO_XOUT_H_REG, 1, Rec_Data, 6, 1000);
+	
+	Gyro_X_RAW = (int16_t)(Rec_Data[0] << 8 | Rec_Data[1]);
+	Gyro_Y_RAW = (int16_t)(Rec_Data[2] << 8 | Rec_Data[3]);
+	Gyro_Z_RAW = (int16_t)(Rec_Data[4] << 8 | Rec_Data[5]);
+	
+	Gx = Gyro_X_RAW/131.0 - 0.02;
+	Gy = Gyro_Y_RAW/131.0 + 0.12;
+	Gz = Gyro_Z_RAW/131.0 - 0.15;
+	
+//	Gx = Gyro_X_RAW/131.0;
+//	Gy = Gyro_Y_RAW/131.0;
+//	Gz = Gyro_Z_RAW/131.0;
+	
+	gyroAngleX = gyroAngleX + Gx * elapsedTime;
+	gyroAngleY = gyroAngleY + Gy * elapsedTime;
 	
 }
 /* USER CODE END 0 */
@@ -139,8 +223,6 @@ int main(void)
 	HAL_I2C_Mem_Write(&hi2c2,HMC5883L_Addr<<1,0x00,1,&CRA,1,100);
 	HAL_I2C_Mem_Write(&hi2c2,HMC5883L_Addr<<1,0x01,1,&CRB,1,100);
 	
-//	HAL_ADCEx_Calibration_Start(&hadc1);
-//	HAL_ADC_Start(&hadc1);
 	HAL_ADC_Start_DMA(&hadc1, VR, 4); // start adc in dma mode for multichannel
   
 	char str[5];
@@ -149,6 +231,8 @@ int main(void)
 	uint8_t vibrate = 0;
 	
 	float result;
+	
+	MPU6050_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -158,259 +242,218 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-		strcat(MSG, "START,");
-		result = valueConvert(VR[2]);
-		if (result > 0.2 || result < - 0.2) {
-			sprintf(str, "%d", VR[2]);
-			sprintf(str, "%f", result);
-			strcat(MSG, str);
-		}
-		else {strcat(MSG, "0");}
-		strcat(MSG, ",");
-		
-		result = valueConvert(VR[3]);
-		if (result > 0.2 || result < - 0.2) {
-			sprintf(str, "%d", VR[3]);
-			sprintf(str, "%f", result);
-			strcat(MSG, str);
-		}
-		else {strcat(MSG, "0");}
-		strcat(MSG, ",");
-		
-		result = valueConvert(VR[0]);
-		if (result > 0.2 || result < - 0.2) {
-			sprintf(str, "%d", VR[0]);
-			sprintf(str, "%f", result);
-			strcat(MSG, str);
-		}
-		else {strcat(MSG, "0");}
-		strcat(MSG, ",");
-		
-		result = valueConvert(VR[1]);
-		if (result > 0.2 || result < - 0.2) {
-			sprintf(str, "%d", VR[1]);
-			sprintf(str, "%f", result);
-			strcat(MSG, str);
-		}
-		else {strcat(MSG, "0");}
-		strcat(MSG, ",");
+			strcat(MSG, "START,");
 			
-
-//		strcat(MSG, "X: ");
-//		sprintf(str, "%4d", X);
-//		strcat(MSG, str);
-//		strcat(MSG, " Y: ");
-//		sprintf(str, "%4d", Y);
-//		strcat(MSG, str);
-//		strcat(MSG, " Z: ");
-//		sprintf(str, "%4d", Z);
-//		strcat(MSG, str);
-//		HAL_UART_Transmit(&huart1, (uint8_t *) MSG3, sizeof(MSG3), 50);
-
-//		strcpy(MSG,",");
-//		if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5)) {
-//			strcat(MSG,"1");
-//		}
-//		else {
-//			strcat(MSG,"0");
-//		}
-//		strcat(MSG, ",");
-		if (button0 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6))
-			{
-//				HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
-				button0 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6)) {
-				button0 = 1;
-				strcat(MSG, "1");
+			// L-Joystick X
+			result = valueConvert(VR[3]);
+			if (result > 0.2 || result < - 0.2) {
+				sprintf(str, "%d", VR[3]);
+				sprintf(str, "%.3f", -result);
+				strcat(MSG, str);
 			}
 			else {strcat(MSG, "0");}
-		}
-		strcat(MSG, ",");
-		
-		if (button1 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9))
-			{
-//				HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_13);
-				button1 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)) {
-				button1 = 1;
-				strcat(MSG, "1");
+			strcat(MSG, ",");
+			
+			// L-Joystick Y
+			result = valueConvert(VR[2]);
+			if (result > 0.2 || result < - 0.2) {
+				sprintf(str, "%d", VR[2]);
+				sprintf(str, "%.3f", -result);
+				strcat(MSG, str);
 			}
 			else {strcat(MSG, "0");}
-		}
-		strcat(MSG, ",");
-		
-		if (button2 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5))
-			{
-				button2 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5)) {
-				button2 = 1;
-				strcat(MSG, "1");
+			strcat(MSG, ",");
+			
+			// R-Joystick X
+			result = valueConvert(VR[1]);
+			if (result > 0.2 || result < - 0.2) {
+				sprintf(str, "%d", VR[1]);
+				sprintf(str, "%.3f", -result);
+				strcat(MSG, str);
 			}
 			else {strcat(MSG, "0");}
-		}
-		strcat(MSG, ",");
-		
-		if (button3 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6))
-			{
-				button3 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6)) {
-				button3 = 1;
-				strcat(MSG, "1");
+			strcat(MSG, ",");
+			
+			// R-Joystick Y
+			result = valueConvert(VR[0]);
+			if (result > 0.2 || result < - 0.2) {
+				sprintf(str, "%d", VR[0]);
+				sprintf(str, "%.3f", -result);
+				strcat(MSG, str);
 			}
 			else {strcat(MSG, "0");}
-		}
-		strcat(MSG, ",");
-		
-		if (button4 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8))
-			{
-				button4 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8)) {
-				button4 = 1;
-				strcat(MSG, "1");
-			}
-			else {strcat(MSG, "0");}
-		}		
-		strcat(MSG, ",");
-		
-		if (button5 == 1) {
-			if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7))
-			{
-				button5 = 0;
-			}
-			strcat(MSG, "0");
-		}
-		else {
-			if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7)) {
-				button5 = 1;
-				strcat(MSG, "1");
-			}
-			else {strcat(MSG, "0");}
-		}		
-		strcat(MSG, ",");
-		
-		HAL_I2C_Mem_Write(&hi2c2,HMC5883L_Addr<<1,0x02,1,&MR,1,100);
-		HAL_Delay(6);
-		
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x03,1,&DXRA,1,100);
-		HAL_Delay(6);
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x04,1,&DXRB,1,100);
-		HAL_Delay(6);
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x07,1,&DYRA,1,100);
-		HAL_Delay(6);
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x08,1,&DYRB,1,100);
-		HAL_Delay(6);
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x05,1,&DZRA,1,100);
-		HAL_Delay(6);
-		HAL_I2C_Mem_Read(&hi2c2,HMC5883L_Addr<<1,0x06,1,&DZRB,1,100);
-		HAL_Delay(6);
-		int16_t X = (DXRA << 8) | (DXRB & 0xFF);
-		int16_t Y = (DYRA << 8) | (DYRB & 0xFF);
-		int16_t Z = (DZRA << 8) | (DZRB & 0xFF);
-		
-		sprintf(str, "%d", X);
-		strcat(MSG, str);
-		strcat(MSG, ",");
-		
-		sprintf(str, "%d", Y);
-		strcat(MSG, str);
-		strcat(MSG, ",");
-		
-		sprintf(str, "%d", Z);
-		strcat(MSG, str);
-		
-//		
-//		int16_t angle;
-//		angle = atan2(Y,X) * (180/3.14159265);
-//		if (angle < 0) angle = 360 + angle;
-//		sprintf(str, "%d", angle);
-//		strcat(MSG, str);
-//		strcat(MSG, ",");
-//		
-//		angle = atan2(Y,Z) * (180/3.14159265);
-//		if (angle < 0) angle = 360 + angle;
-//		sprintf(str, "%d", angle);
-//		strcat(MSG, str);
-//		strcat(MSG, ",");
-//		
-//		angle = atan2(Z,X) * (180/3.14159265);
-//		if (angle < 0) angle = 360 + angle;
-//		sprintf(str, "%d", angle);
-//		strcat(MSG, str);
-
-		strcat(MSG, "\r\n");
-		
-		HAL_UART_Transmit(&huart1, (uint8_t *) MSG, sizeof(MSG), 10);
-//		strcpy(MSG,"");
-		memset(MSG, 0, sizeof(MSG));
-//		if (vibrate == 1) {
-//			if(RX1_Char == '0')
-//			{
-//				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
-//				HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
-//				RX1_Char = 0x00;
-//				vibrate = 0;
-//			}
-//		}
-//		else {
-			if(RX1_Char == '1') {
-				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);				
-				HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
-				RX1_Char = 0x00;
-				vibrate = 1;
-			}
-			if (vibrate > 0) {
-				vibrate++;
-				if (vibrate == 3) {
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
-					vibrate = 0;
+			strcat(MSG, ",");
+					
+			// Button X
+			if (button0 == 1) {
+				if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6))
+				{
+					button0 = 0;
 				}
+				strcat(MSG, "0");
 			}
-//		}
-//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
-		
-//		if(RX1_Char == '1')
-//		{
-//			HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
-//			HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
-//			HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
-//			RX1_Char = 0x00;
-//		}
-		if(RX1_Char == '2')
-		{
-			HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_13);
-			HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
-			RX1_Char = 0x00;
+			else {
+				if(!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6)) {
+					button0 = 1;
+					strcat(MSG, "1");
+				}
+				else {strcat(MSG, "0");}
+			}
+			strcat(MSG, ",");
+			
+			// Button A
+			if (button1 == 1) {
+				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9))
+				{
+					button1 = 0;
+				}
+				strcat(MSG, "0");
+			}
+			else {
+				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)) {
+					button1 = 1;
+					strcat(MSG, "1");
+				}
+				else {strcat(MSG, "0");}
+			}
+			strcat(MSG, ",");
+			
+			// Button B
+//			if (button2 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5))
+//				{
+//					button2 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5)) {
+//					button2 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}
+//			strcat(MSG, ",");
+//			
+//			// Button Y
+//			if (button3 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6))
+//				{
+//					button3 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6)) {
+//					button3 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}
+//			strcat(MSG, ",");
+//			
+//			// Button
+//			if (button4 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8))
+//				{
+//					button4 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8)) {
+//					button4 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}		
+//			strcat(MSG, ",");
+//			
+//			// Button
+//			if (button5 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7))
+//				{
+//					button5 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7)) {
+//					button5 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}		
+//			strcat(MSG, ",");
+			
+			if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
+			if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
+			if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
+			if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
+			
+			// IMU - MPU6050
+			
+			MPU6050_Read_Accel();
+			MPU6050_Read_Gyro();
+						
+			yaw = yaw + Gz * elapsedTime;
+			roll = atan2(Ay, sqrt(pow(Ax,2) +pow(Az,2)))*180/PI;
+			pitch = atan2(Ax, sqrt(pow(Ay, 2) + pow(Az,2)))*180/PI;
+			
+			sprintf(str, "%.2f", roll);
+			strcat(MSG, str);
+			strcat(MSG, ",");
+
+			sprintf(str, "%.2f", pitch);
+			strcat(MSG, str);
+			strcat(MSG, ",");
+			
+			sprintf(str, "%.2f", yaw);
+			strcat(MSG, str);
+			
+			strcat(MSG, "\r\n");
+			
+			// UART Transmit
+			HAL_UART_Transmit(&huart1, (uint8_t *) MSG, sizeof(MSG), 10);
+			memset(MSG, 0, sizeof(MSG));
+
+				if(RX1_Char == '1') {
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);				
+					HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
+					RX1_Char = 0x00;
+					vibrate = 1;
+				}
+				if (vibrate > 0) {
+					vibrate++;
+					if (vibrate == 3) {
+						HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+						vibrate = 0;
+					}
+				}
 		}
-//		HAL_UART_Transmit(&huart1, (uint8_t *) &RX1_Char, sizeof(&RX1_Char), 100);
-		
-//		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
-		HAL_Delay(80-36);
-  }
+
+			HAL_Delay(300);
+  
   /* USER CODE END 3 */
 }
 
@@ -578,7 +621,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 57600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
