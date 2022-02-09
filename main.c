@@ -233,6 +233,10 @@ int main(void)
 	float result;
 	
 	MPU6050_Init();
+	HAL_Delay(1000);
+	
+	uint8_t Rx_data[10];
+	
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -285,39 +289,39 @@ int main(void)
 			strcat(MSG, ",");
 					
 			// Button X
-			if (button0 == 1) {
-				if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6))
-				{
-					button0 = 0;
-				}
-				strcat(MSG, "0");
-			}
-			else {
-				if(!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6)) {
-					button0 = 1;
-					strcat(MSG, "1");
-				}
-				else {strcat(MSG, "0");}
-			}
-			strcat(MSG, ",");
-			
-			// Button A
-			if (button1 == 1) {
-				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9))
-				{
-					button1 = 0;
-				}
-				strcat(MSG, "0");
-			}
-			else {
-				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)) {
-					button1 = 1;
-					strcat(MSG, "1");
-				}
-				else {strcat(MSG, "0");}
-			}
-			strcat(MSG, ",");
-			
+//			if (button0 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6))
+//				{
+//					button0 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6)) {
+//					button0 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}
+//			strcat(MSG, ",");
+//			
+//			// Button A
+//			if (button1 == 1) {
+//				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9))
+//				{
+//					button1 = 0;
+//				}
+//				strcat(MSG, "0");
+//			}
+//			else {
+//				if(!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)) {
+//					button1 = 1;
+//					strcat(MSG, "1");
+//				}
+//				else {strcat(MSG, "0");}
+//			}
+//			strcat(MSG, ",");
+//			
 			// Button B
 //			if (button2 == 1) {
 //				if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5))
@@ -386,6 +390,18 @@ int main(void)
 //			}		
 //			strcat(MSG, ",");
 			
+			if (!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
+			if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)) {
+				strcat(MSG, "1");
+			} else {
+				strcat(MSG, "0");
+			}
+			strcat(MSG, ",");
 			if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_5)) {
 				strcat(MSG, "1");
 			} else {
@@ -417,8 +433,13 @@ int main(void)
 			MPU6050_Read_Gyro();
 						
 			yaw = yaw + Gz * elapsedTime;
-			roll = atan2(Ay, sqrt(pow(Ax,2) +pow(Az,2)))*180/PI;
-			pitch = atan2(Ax, sqrt(pow(Ay, 2) + pow(Az,2)))*180/PI;
+//			accAngleX = atan2(Ay, sqrt(pow(Ax,2) +pow(Az,2)))*180/PI;
+//			accAngleY = atan2(Ax, sqrt(pow(Ay, 2) + pow(Az,2)))*180/PI;
+//			gyroAngleX = gyroAngleX + Gx * elapsedTime;
+//			gyroAngleY = gyroAngleY + Gy * elapsedTime;
+			
+			roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
+			pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
 			
 			sprintf(str, "%.2f", roll);
 			strcat(MSG, str);
@@ -431,28 +452,37 @@ int main(void)
 			sprintf(str, "%.2f", yaw);
 			strcat(MSG, str);
 			
+//			strcat(MSG, ",");
+//			HAL_UART_Receive(&huart1, Rx_data, 10, 5);
+//			
+//			sprintf(str, "%d", (uint8_t)Rx_data);
+//			strcat(MSG, str);			
+//			
 			strcat(MSG, "\r\n");
 			
 			// UART Transmit
 			HAL_UART_Transmit(&huart1, (uint8_t *) MSG, sizeof(MSG), 10);
 			memset(MSG, 0, sizeof(MSG));
 
-				if(RX1_Char == '1') {
-					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);				
-					HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
-					RX1_Char = 0x00;
-					vibrate = 1;
+//			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
+			
+			
+			if(RX1_Char == '1') {
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);				
+				HAL_UART_Receive_IT(&huart1, &RX1_Char, 1);
+				RX1_Char = 0x00;
+				vibrate = 1;
+			}
+			if (vibrate > 0) {
+				vibrate++;
+				if (vibrate == 1*5) {
+					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+					vibrate = 0;
 				}
-				if (vibrate > 0) {
-					vibrate++;
-					if (vibrate == 3) {
-						HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
-						vibrate = 0;
-					}
-				}
+			}
+			HAL_Delay(10);
 		}
-
-			HAL_Delay(300);
+		
   
   /* USER CODE END 3 */
 }
@@ -621,7 +651,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 57600;
+  huart1.Init.BaudRate = 115200;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
